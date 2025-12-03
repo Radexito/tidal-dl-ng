@@ -18,7 +18,10 @@ Performance:
     - Thread-safe signal emissions
 """
 
+from contextlib import suppress
+
 from PySide6 import QtCore, QtGui, QtWidgets
+from shiboken6 import Shiboken
 from tidalapi import Album, Mix, Playlist, Track, Video
 from tidalapi.artist import Artist
 
@@ -87,29 +90,28 @@ class HoverManager(QtCore.QObject):
         # Install event filter on viewport (where mouse events occur)
         self.tree_view.viewport().installEventFilter(self)
         self.tree_view.viewport().setMouseTracking(True)
+        self.tree_view.destroyed.connect(self.stop)
 
     def stop(self) -> None:
-        """Stop the hover manager and clean up event filters."""
-        try:
-            if self.tree_view:
-                self.tree_view.viewport().removeEventFilter(self)
-                self.tree_view = None
-        except RuntimeError:
-            pass
-        if self.timer and self.timer.isActive():
-            self.timer.stop()
+        """Detach event filters and stop timers to avoid dangling references."""
+        viewport = None
+        if self._is_valid(self.tree_view):
+            with suppress(RuntimeError):
+                viewport = self.tree_view.viewport()
+                if self._is_valid(viewport):
+                    viewport.removeEventFilter(self)
+        self.tree_view = None
+
+        if self.debounce_timer.isActive():
+            self.debounce_timer.stop()
+        self.pending_media = None
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        """Filter events to detect mouse movements over tree items.
-
-        Args:
-            watched (QObject): The object being watched.
-            event (QEvent): The event to filter.
-
-        Returns:
-            bool: True if event is handled, False otherwise.
-        """
-        if watched == self.tree_view.viewport():
+        """Filter events to detect mouse movements over tree items."""
+        viewport = self.tree_view.viewport() if self._is_valid(self.tree_view) else None
+        if viewport and not self._is_valid(viewport):
+            viewport = None
+        if viewport and watched == viewport:
             if event.type() == QtCore.QEvent.Type.MouseMove:
                 # Cast to QMouseEvent for type safety
                 mouse_event = QtGui.QMouseEvent(event)
@@ -119,6 +121,11 @@ class HoverManager(QtCore.QObject):
 
         # Don't consume the event - let it propagate
         return False
+
+    @staticmethod
+    def _is_valid(widget: QtCore.QObject | None) -> bool:
+        """Return True if the Qt object still owns a C++ instance."""
+        return widget is not None and Shiboken.isValid(widget)
 
     def _handle_mouse_move(self, event: QtGui.QMouseEvent) -> None:
         """Handle mouse move events over the tree view.
