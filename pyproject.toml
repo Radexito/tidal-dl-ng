@@ -238,3 +238,5 @@ disallow_any_unimported = true
 # shiboken6 is a transitive dependency from PySide6 that we intentionally use directly
 # for type checking and widget deletion (Shiboken.isValid, Shiboken.delete)
 extend_exclude = []
+# Deptry v0.23+: use per_rule_ignores instead of the deprecated ignore_transitive
+per_rule_ignores = { DEP003 = ["shiboken6"] }
